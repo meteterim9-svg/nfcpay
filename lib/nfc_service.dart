@@ -11,6 +11,7 @@ class NfcCardData {
 /// Owns exactly one NFC session at a time.
 class NfcService {
   static bool _sessionOn = false;
+  static Completer<String?>? _activeCompleter;
 
   static Future<bool> supported() async {
     try {
@@ -27,6 +28,7 @@ class NfcService {
     if (_sessionOn || !await supported()) return null;
 
     final completer = Completer<String?>();
+    _activeCompleter = completer;
     Timer? timer;
     _sessionOn = true;
 
@@ -64,11 +66,15 @@ class NfcService {
       return null;
     } finally {
       timer?.cancel();
+      if (identical(_activeCompleter, completer)) _activeCompleter = null;
       await closeSession();
     }
   }
 
   static Future<void> stop() async {
+    final pending = _activeCompleter;
+    if (pending != null && !pending.isCompleted) pending.complete(null);
+    _activeCompleter = null;
     if (!_sessionOn) return;
     _sessionOn = false;
     try {
