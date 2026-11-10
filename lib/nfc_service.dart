@@ -45,7 +45,8 @@ class NfcService {
         onDiscovered: (tag) async {
           if (completer.isCompleted) return;
           final id = _identifier(tag);
-          completer.complete(id);
+          // Any discovered NFC tag triggers the local payment flow.
+          completer.complete(id.isEmpty ? 'NFC etiketi algılandı' : id);
           await closeSession();
         },
       );
