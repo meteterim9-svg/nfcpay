@@ -4,7 +4,7 @@ import 'cardinfo.dart';
 import 'nfc_service.dart';
 import 'theme.dart';
 
-enum _ReaderState { idle, checking, scanning, detected, unavailable, failed }
+enum _ReaderState { idle, checking, scanning, processing, detected, success, unavailable, failed }
 
 class PaymentScreen extends StatefulWidget {
   const PaymentScreen({super.key});
@@ -28,6 +28,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Future<void> _startScan() async {
     if (_busy) return;
+    if (_amount == null || _amount! <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Önce geçerli bir tutar girin.')));
+      return;
+    }
     setState(() {
       _busy = true;
       _state = _ReaderState.checking;
@@ -54,9 +58,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _state = _ReaderState.failed;
       } else {
         _tagId = result.id;
-        _state = _ReaderState.detected;
+        _state = _ReaderState.processing;
       }
     });
+    if (result != null) {
+      await Future.delayed(const Duration(seconds: 4));
+      if (!mounted) return;
+      setState(() => _state = _ReaderState.success);
+    }
   }
 
   void _cancelScan() {
@@ -158,7 +167,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _state == _ReaderState.scanning) {
       return _scanning();
     }
-    if (_state == _ReaderState.detected) return _detected();
+    if (_state == _ReaderState.processing) return _processing();
+    if (_state == _ReaderState.detected || _state == _ReaderState.success) return _success();
     if (_state == _ReaderState.unavailable) {
       return _message(
         icon: Icons.nfc_rounded,
@@ -253,7 +263,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ),
           const SizedBox(height: 16),
           FilledButton.icon(
-            onPressed: _startScan,
+            onPressed: _amount == null ? null : _startScan,
             icon: const Icon(Icons.contactless_rounded),
             label: const Text('NFC kartını okut'),
           ),
@@ -279,7 +289,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Kartın NFC kimliği okunur. Para tahsilatı ve banka onayı için lisanslı ödeme sağlayıcısı entegrasyonu gerekir.',
+              'Tutarı girin, herhangi bir NFC etiketi okutun ve işlemin tamamlanma animasyonunu izleyin.',
               style: TextStyle(color: kMuted, fontSize: 12, height: 1.45),
             ),
           ),
@@ -334,70 +344,39 @@ class _PaymentScreenState extends State<PaymentScreen> {
     );
   }
 
-  Widget _detected() {
-    return Center(
-      key: const ValueKey('detected'),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: const BoxDecoration(
-                  color: Color(0xFF123B32), shape: BoxShape.circle),
-              child: const Icon(Icons.check_rounded,
-                  color: kGreen, size: 56),
-            ),
-            const SizedBox(height: 22),
-            const Text('Kart algılandı',
-                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 8),
-            const Text('NFC etiketi başarıyla okundu.',
-                style: TextStyle(color: kMuted)),
-            const SizedBox(height: 24),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                  color: kCard, borderRadius: BorderRadius.circular(18)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('NFC KİMLİĞİ',
-                      style: TextStyle(
-                          color: kMuted,
-                          fontSize: 11,
-                          letterSpacing: 1.2,
-                          fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 10),
-                  SelectableText(
-                    _tagId ?? 'Okunamadı',
-                    style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.4),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Bu sonuç kartın algılandığını gösterir; ödeme onayı değildir.',
-                    style: TextStyle(color: kMuted, fontSize: 12, height: 1.4),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 22),
-            FilledButton.icon(
-              onPressed: _reset,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Yeni okuma'),
-            ),
-          ],
-        ),
-      ),
-    );
+  Widget _processing() {
+    return Center(key: const ValueKey('processing'), child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const GradientSpinner(size: 82),
+      const SizedBox(height: 28),
+      const Text('Ödeme işleniyor', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 10),
+      Text('${formatAmount(_amount ?? 0)} ₺', style: const TextStyle(color: kGreen, fontSize: 28, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 12),
+      const Text('NFC bağlantısı tamamlandı. İşlem hazırlanıyor...', textAlign: TextAlign.center, style: TextStyle(color: kMuted, height: 1.5)),
+    ])));
   }
 
+  Widget _success() {
+    return Center(key: const ValueKey('success'), child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Container(width: 112, height: 112, decoration: const BoxDecoration(color: Color(0xFF123B32), shape: BoxShape.circle), child: const Icon(Icons.check_rounded, color: kGreen, size: 66)),
+      const SizedBox(height: 24),
+      const Text('Ödeme başarıyla tamamlandı', textAlign: TextAlign.center, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 10),
+      const Text('İşlem başarıyla sonuçlandı.', style: TextStyle(color: kMuted)),
+      const SizedBox(height: 26),
+      Container(width: double.infinity, padding: const EdgeInsets.all(22), decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(20)), child: Column(children: [
+        const Text('İŞLEM TUTARI', style: TextStyle(color: kMuted, fontSize: 11, letterSpacing: 1.3, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        Text('${formatAmount(_amount ?? 0)} ₺', style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 14),
+        const Divider(color: Colors.white12),
+        const SizedBox(height: 8),
+        const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.verified_rounded, color: kGreen, size: 18), SizedBox(width: 8), Text('İşlem onaylandı', style: TextStyle(color: kGreen))]),
+      ])),
+      const SizedBox(height: 24),
+      SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: _reset, icon: const Icon(Icons.add_rounded), label: const Text('Yeni işlem'))),
+    ])));
+  }
   Widget _message({
     required IconData icon,
     required String title,
