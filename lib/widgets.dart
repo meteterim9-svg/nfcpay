@@ -19,7 +19,7 @@ class KeypadKey extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Material(
-          color: Colors.white.withValues(alpha: 0.08),
+          color: Colors.white.withOpacity(0.08),
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),
@@ -81,7 +81,7 @@ class PinDots extends StatelessWidget {
                             ],
                     )
                   : null,
-              color: i < filled ? null : Colors.white.withValues(alpha: 0.18),
+              color: i < filled ? null : Colors.white.withOpacity(0.18),
             ),
           ),
       ],

@@ -135,7 +135,7 @@ class GlowIcon extends StatelessWidget {
         gradient: kGradient,
         shape: BoxShape.circle,
         boxShadow: [
-          BoxShadow(color: kBlue.withValues(alpha: 0.5), blurRadius: 24),
+          BoxShadow(color: kBlue.withOpacity(0.5), blurRadius: 24),
         ],
       ),
       child: Icon(icon, color: Colors.white, size: size),
