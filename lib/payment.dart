@@ -4,8 +4,7 @@ import 'cardinfo.dart';
 import 'nfc_service.dart';
 import 'theme.dart';
 
-/// Odeme akisinin adimlari.
-enum PayStep { amount, confirm, checkNfc, waiting, processing, success }
+enum _ReaderState { idle, checking, scanning, detected, unavailable, failed }
 
 class PaymentScreen extends StatefulWidget {
   const PaymentScreen({super.key});
@@ -16,11 +15,10 @@ class PaymentScreen extends StatefulWidget {
 
 class _PaymentScreenState extends State<PaymentScreen> {
   String _raw = '';
-  PayStep _step = PayStep.amount;
-  double _amount = 0;
-  CardInfo? _card;
-  String? _nfcMessage;
-  int _receiptSeed = 0;
+  double? _amount;
+  _ReaderState _state = _ReaderState.idle;
+  String? _tagId;
+  bool _busy = false;
 
   @override
   void dispose() {
@@ -28,105 +26,67 @@ class _PaymentScreenState extends State<PaymentScreen> {
     super.dispose();
   }
 
-  Future<void> _confirmAmount() async {
-    final v = AmountInputFormatter.parse(_raw);
-    if (v == null) {
-      _say('Geçerli bir tutar gir');
-      return;
-    }
-    if (v > 100000) {
-      _say('Tek seferde en fazla 100.000,00 ödeyebilirsin');
-      return;
-    }
+  Future<void> _startScan() async {
+    if (_busy) return;
     setState(() {
-      _amount = v;
-      _step = PayStep.confirm;
+      _busy = true;
+      _state = _ReaderState.checking;
+      _tagId = null;
     });
-  }
 
-  /// 1) Cihazda NFC var mi, acik mi?
-  Future<void> _pay() async {
-    setState(() {
-      _step = PayStep.checkNfc;
-      _nfcMessage = 'Telefonda NFC kontrol ediliyor…';
-    });
-    await Future<void>.delayed(const Duration(milliseconds: 900));
-
-    final ok = await NfcService.supported();
+    final available = await NfcService.supported();
     if (!mounted) return;
-    if (!ok) {
+    if (!available) {
       setState(() {
-        _step = PayStep.confirm;
-        _nfcMessage = 'NFC kapalı ya da cihazda yok. Açıp tekrar dene.';
+        _busy = false;
+        _state = _ReaderState.unavailable;
       });
       return;
     }
-    await _waitCard();
-  }
 
-  /// 2) "Karti okut" ekrani.
-  Future<void> _waitCard() async {
-    setState(() => _step = PayStep.waiting);
-    final res = await NfcService.read();
+    setState(() => _state = _ReaderState.scanning);
+    final result = await NfcService.read();
     if (!mounted) return;
 
-    if (res == null) {
-      setState(() {
-        _step = PayStep.confirm;
-        _nfcMessage = 'Kart okunamadı. Tekrar dene.';
-      });
-      _say('Kart okunamadı. Tekrar dene.');
-      return;
-    }
-    await _finish(res.id);
-  }
-
-  /// 3) Islem animasyonu (4-5 sn) ve basarili ekrani.
-  Future<void> _finish(String nfcId) async {
-    setState(() => _step = PayStep.processing);
-    await Future<void>.delayed(const Duration(milliseconds: 4500));
-    if (!mounted) return;
-
-    var digits = nfcId.replaceAll(RegExp(r'[^0-9]'), '');
-    var seed = 0;
-    for (final c in nfcId.codeUnits) {
-      seed = (seed * 31 + c) & 0x7fffffff;
-    }
-    if (digits.length < 16) {
-      var x = seed == 0 ? 1 : seed;
-      while (digits.length < 16) {
-        x = (x * 1103515245 + 12345) & 0x7fffffff;
-        digits += (x % 10).toString();
+    setState(() {
+      _busy = false;
+      if (result == null) {
+        _state = _ReaderState.failed;
+      } else {
+        _tagId = result.id;
+        _state = _ReaderState.detected;
       }
-    }
-    setState(() {
-      _card = CardInfo.fromNumber(digits.substring(0, 16));
-      _receiptSeed = seed;
-      _step = PayStep.success;
     });
+  }
+
+  void _cancelScan() {
+    NfcService.stop();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _state = _ReaderState.idle;
+      _tagId = null;
+    });
+  }
+
+  void _press(String key) {
+    if (key == 'del') {
+      if (_raw.isNotEmpty) _raw = _raw.substring(0, _raw.length - 1);
+    } else {
+      _raw = AmountInputFormatter.normalize(_raw + key);
+    }
+    _amount = AmountInputFormatter.parse(_raw);
   }
 
   void _reset() {
     NfcService.stop();
     setState(() {
       _raw = '';
-      _step = PayStep.amount;
-      _amount = 0;
-      _card = null;
-      _nfcMessage = null;
-      _receiptSeed = 0;
+      _amount = null;
+      _tagId = null;
+      _state = _ReaderState.idle;
+      _busy = false;
     });
-  }
-
-  void _say(String text) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(text)));
-  }
-
-  String get _receiptNo {
-    final n = (_receiptSeed % 900000) + 100000;
-    return 'NF$n';
   }
 
   @override
@@ -135,307 +95,339 @@ class _PaymentScreenState extends State<PaymentScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            GradientHeader(
-              title: 'NFC Ödeme',
-              subtitle: _step == PayStep.amount
-                  ? 'İnternetsiz çalışır'
-                  : 'İşlem ekranı',
+            _header(),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                child: _content(),
+              ),
             ),
-            Expanded(child: _body()),
           ],
         ),
       ),
     );
   }
 
-  Widget _body() {
-    switch (_step) {
-      case PayStep.amount:
-        return _amountBody();
-      case PayStep.confirm:
-        return _confirmBody();
-      case PayStep.checkNfc:
-        return _statusBody(Icons.nfc, 'NFC kontrol ediliyor', _nfcMessage);
-      case PayStep.waiting:
-        return _waitingBody();
-      case PayStep.processing:
-        return _processingBody();
-      case PayStep.success:
-        return _successBody();
-    }
-  }
-
-  Widget _pad(String label, VoidCallback onTap) {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.all(6),
-        child: Material(
-          color: kCard,
-          borderRadius: BorderRadius.circular(18),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: onTap,
-            child: SizedBox(
-              height: 62,
-              child: Center(
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
+  Widget _header() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
+      decoration: const BoxDecoration(
+        gradient: kGradient,
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(30)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(.18),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.nfc_rounded, color: Colors.white, size: 28),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('NFC Pay',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 23,
+                        fontWeight: FontWeight.w800)),
+                SizedBox(height: 3),
+                Text('Temassız kart okuyucu',
+                    style: TextStyle(color: Colors.white70, fontSize: 13)),
+              ],
             ),
           ),
-        ),
+          IconButton(
+            tooltip: 'Sıfırla',
+            onPressed: _busy ? null : _reset,
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+          ),
+        ],
       ),
     );
   }
 
-  void _press(String key) {
-    if (key == 'del') {
-      if (_raw.isNotEmpty) {
-        _raw = _raw.substring(0, _raw.length - 1);
-      }
-      return;
+  Widget _content() {
+    if (_state == _ReaderState.checking ||
+        _state == _ReaderState.scanning) {
+      return _scanning();
     }
-    _raw = AmountInputFormatter.normalize(_raw + key);
+    if (_state == _ReaderState.detected) return _detected();
+    if (_state == _ReaderState.unavailable) {
+      return _message(
+        icon: Icons.nfc_rounded,
+        title: 'NFC kullanılamıyor',
+        detail:
+            'Bu cihazda NFC bulunmuyor veya NFC kapalı. Ayarlardan NFC’yi açıp tekrar deneyin.',
+        action: 'Tekrar dene',
+        onAction: _startScan,
+      );
+    }
+    if (_state == _ReaderState.failed) {
+      return _message(
+        icon: Icons.error_outline_rounded,
+        title: 'Kart okunamadı',
+        detail:
+            'Okuma süresi doldu veya kart algılanamadı. Telefonun NFC alanını kartın üzerine yaklaştırıp yeniden deneyin.',
+        action: 'Yeniden tara',
+        onAction: _startScan,
+      );
+    }
+    return _home();
   }
 
-  Widget _amountBody() {
-    final amount = AmountInputFormatter.parse(_raw);
+  Widget _home() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      key: const ValueKey('home'),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const Text('Yeni işlem',
+              style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800)),
           const SizedBox(height: 6),
-          const Text('Ödenecek tutar', style: TextStyle(color: kMuted)),
-          const SizedBox(height: 6),
-          Text(
-            amount == null ? '0,00 ₺' : '${formatAmount(amount)} ₺',
-            style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w800),
+          const Text('Tutarı girin ve NFC kartını okutun.',
+              style: TextStyle(color: kMuted, fontSize: 14)),
+          const SizedBox(height: 22),
+          Container(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+            decoration: BoxDecoration(
+              color: kCard,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: Colors.white.withOpacity(.06)),
+            ),
+            child: Column(
+              children: [
+                const Text('İşlem tutarı',
+                    style: TextStyle(color: kMuted, fontSize: 13)),
+                const SizedBox(height: 8),
+                Text(
+                  _amount == null ? '0,00 ₺' : '${formatAmount(_amount!)} ₺',
+                  style: const TextStyle(
+                      fontSize: 38, fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 14),
           for (final row in const [
             ['1', '2', '3'],
             ['4', '5', '6'],
             ['7', '8', '9'],
+            [',', '0', 'del'],
           ])
             Row(
               children: [
-                for (final k in row)
-                  _pad(k, () => setState(() => _press(k))),
+                for (final key in row)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Material(
+                        color: kCard,
+                        borderRadius: BorderRadius.circular(15),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(15),
+                          onTap: () => setState(() => _press(key)),
+                          child: SizedBox(
+                            height: 54,
+                            child: Center(
+                              child: key == 'del'
+                                  ? const Icon(Icons.backspace_outlined)
+                                  : Text(key,
+                                      style: const TextStyle(
+                                          fontSize: 21,
+                                          fontWeight: FontWeight.w700)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
-          Row(
-            children: [
-              _pad(',', () => setState(() => _press(','))),
-              _pad('0', () => setState(() => _press('0'))),
-              _pad('⌫', () => setState(() => _press('del'))),
-            ],
-          ),
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _confirmAmount,
-            child: const Text('Ödeme yap'),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Demo uygulamasıdır, gerçek para transferi yapmaz.',
-            style: TextStyle(fontSize: 12, color: kMuted),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _confirmBody() {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          const Spacer(),
-          const GlowIcon(Icons.credit_card, size: 30),
-          const SizedBox(height: 20),
-          const Text('Ödeme onayı', style: TextStyle(color: kMuted)),
-          const SizedBox(height: 6),
-          Text(
-            '${formatAmount(_amount)} ₺',
-            style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 24),
-          if (_nfcMessage != null) ...[
-            Text(
-              _nfcMessage!,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: kPink),
-            ),
-            const SizedBox(height: 16),
-          ],
-          const Spacer(),
+          const SizedBox(height: 16),
           FilledButton.icon(
-            onPressed: _pay,
-            icon: const Icon(Icons.nfc),
-            label: const Text('Ödemeyi başlat'),
+            onPressed: _startScan,
+            icon: const Icon(Icons.contactless_rounded),
+            label: const Text('NFC kartını okut'),
           ),
-          TextButton(onPressed: _reset, child: const Text('Tutarı değiştir')),
+          const SizedBox(height: 16),
+          _infoPanel(),
         ],
       ),
     );
   }
 
-  Widget _statusBody(IconData icon, String title, String? message) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+  Widget _infoPanel() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: kBlue.withOpacity(.10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kBlue.withOpacity(.22)),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          GlowIcon(icon, size: 32),
-          const SizedBox(height: 24),
-          Text(
-            title,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          Icon(Icons.info_outline_rounded, color: kBlue),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Kartın NFC kimliği okunur. Para tahsilatı ve banka onayı için lisanslı ödeme sağlayıcısı entegrasyonu gerekir.',
+              style: TextStyle(color: kMuted, fontSize: 12, height: 1.45),
+            ),
           ),
-          if (message != null) ...[
+        ],
+      ),
+    );
+  }
+
+  Widget _scanning() {
+    final checking = _state == _ReaderState.checking;
+    return Center(
+      key: const ValueKey('scanning'),
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 116,
+              height: 116,
+              decoration: BoxDecoration(
+                color: kBlue.withOpacity(.13),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.contactless_rounded,
+                  size: 58, color: kBlue),
+            ),
+            const SizedBox(height: 28),
+            Text(
+              checking ? 'NFC kontrol ediliyor' : 'Kartınızı yaklaştırın',
+              style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 10),
             Text(
-              message,
+              checking
+                  ? 'Cihazın NFC bağlantısı kontrol ediliyor.'
+                  : 'Telefonun arka yüzünü NFC kartına yaklaştırın. Okuma 30 saniye içinde tamamlanır.',
               textAlign: TextAlign.center,
-              style: const TextStyle(color: kMuted),
+              style: const TextStyle(color: kMuted, height: 1.5),
+            ),
+            const SizedBox(height: 30),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 26),
+            OutlinedButton.icon(
+              onPressed: _cancelScan,
+              icon: const Icon(Icons.close_rounded),
+              label: const Text('İptal et'),
             ),
           ],
-          const SizedBox(height: 24),
-          const GradientSpinner(size: 44),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _waitingBody() {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          const Spacer(),
-          const GlowIcon(Icons.nfc, size: 40),
-          const SizedBox(height: 28),
-          const Text(
-            'Kartı okut',
-            style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Telefonun arkasını karta yaklaştır.\n'
-            'NFC alanı genelde kameranın yanındadır.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: kMuted),
-          ),
-          const SizedBox(height: 28),
-          const GradientSpinner(size: 56),
-          const Spacer(),
-          TextButton.icon(
-            onPressed: _reset,
-            icon: const Icon(Icons.close),
-            label: const Text('İptal'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _processingBody() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          GlowIcon(Icons.sync, size: 36),
-          SizedBox(height: 28),
-          Text(
-            'Ödeme işleniyor…',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-          ),
-          SizedBox(height: 24),
-          GradientSpinner(size: 60),
-          SizedBox(height: 16),
-          Text(
-            'Bu işlem internet gerektirmez.',
-            style: TextStyle(fontSize: 12, color: kMuted),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _successBody() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          const SizedBox(height: 8),
-          Container(
-            width: 104,
-            height: 104,
-            decoration: const BoxDecoration(
-              gradient: kGradient,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(color: kGreen, blurRadius: 30, spreadRadius: 2),
-              ],
+  Widget _detected() {
+    return Center(
+      key: const ValueKey('detected'),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Container(
+              width: 100,
+              height: 100,
+              decoration: const BoxDecoration(
+                  color: Color(0xFF123B32), shape: BoxShape.circle),
+              child: const Icon(Icons.check_rounded,
+                  color: kGreen, size: 56),
             ),
-            child: const Icon(Icons.check, size: 58, color: Colors.white),
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'Ödeme başarılı',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${formatAmount(_amount)} ₺',
-            style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 22),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: kCard,
-              borderRadius: BorderRadius.circular(16),
+            const SizedBox(height: 22),
+            const Text('Kart algılandı',
+                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            const Text('NFC etiketi başarıyla okundu.',
+                style: TextStyle(color: kMuted)),
+            const SizedBox(height: 24),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                  color: kCard, borderRadius: BorderRadius.circular(18)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('NFC KİMLİĞİ',
+                      style: TextStyle(
+                          color: kMuted,
+                          fontSize: 11,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 10),
+                  SelectableText(
+                    _tagId ?? 'Okunamadı',
+                    style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.4),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Bu sonuç kartın algılandığını gösterir; ödeme onayı değildir.',
+                    style: TextStyle(color: kMuted, fontSize: 12, height: 1.4),
+                  ),
+                ],
+              ),
             ),
-            child: Column(
-              children: [
-                _row('Kart', _card!.maskedTail),
-                _row('Kart sahibi', _card!.name),
-                _row('Banka', _card!.bank),
-                _row('Son kullanma', _card!.expiry),
-                _row('İşlem no', _receiptNo),
-                _row('Durum', 'Onaylandı', color: kGreen),
-              ],
+            const SizedBox(height: 22),
+            FilledButton.icon(
+              onPressed: _reset,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Yeni okuma'),
             ),
-          ),
-          const SizedBox(height: 20),
-          FilledButton(onPressed: _reset, child: const Text('Yeni ödeme')),
-          const SizedBox(height: 8),
-          const Text(
-            'Demo — gerçek para transferi yapılmamıştır.',
-            style: TextStyle(fontSize: 12, color: kMuted),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _row(String label, String value, {Color? color}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: kMuted)),
-          Text(
-            value,
-            style: TextStyle(fontWeight: FontWeight.w700, color: color),
-          ),
-        ],
+  Widget _message({
+    required IconData icon,
+    required String title,
+    required String detail,
+    required String action,
+    required VoidCallback onAction,
+  }) {
+    return Center(
+      key: ValueKey(title),
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: kPink, size: 64),
+            const SizedBox(height: 22),
+            Text(title,
+                textAlign: TextAlign.center,
+                style:
+                    const TextStyle(fontSize: 23, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 10),
+            Text(detail,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: kMuted, height: 1.5)),
+            const SizedBox(height: 26),
+            FilledButton(
+                onPressed: onAction, child: Text(action)),
+            TextButton(onPressed: _reset, child: const Text('Ana ekrana dön')),
+          ],
+        ),
       ),
     );
   }
