@@ -1,0 +1,23 @@
+name: nfcpay
+description: Internetsiz calisan, NFC ile odeme yapilan eglence amacli Flutter uygulamasi (demo).
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_secure_storage: ^9.2.2
+  crypto: ^3.0.3
+  pointycastle: ^3.9.1
+  local_auth: ^2.3.0
+  nfc_manager: ^3.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
