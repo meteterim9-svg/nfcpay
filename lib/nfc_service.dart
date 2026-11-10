@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:nfc_manager/nfc_manager.dart';
 
@@ -10,93 +9,81 @@ class NfcCardData {
   const NfcCardData({required this.id});
 }
 
-/// NFC donanimini yonetir.
+/// NFC donanimini yonetir. Ag erisimi yoktur; sadece kart okunur.
 class NfcService {
+  static bool _sessionOn = false;
+
   /// Cihazda NFC acik mi?
   static Future<bool> supported() async {
     try {
-      return await NfcManager.instance.isAvailable();
+      final r = await NfcManager.instance.isAvailable();
+      return r is bool ? r : false;
     } catch (_) {
       return false;
     }
   }
 
-  /// Kullaniciya api numarasindan okunacak kart bilgisini sorar.
-  static Future<String> askCardNumber() async {
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: navigatorKey.currentContext!,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Kart numarasi gerekli'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          maxLength: 16,
-          decoration: const InputDecoration(counterText: ''),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Vazgec'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Tamam'),
-          ),
-        ],
-      ),
-    );
-    final v = ctrl.text.trim();
-    return ok == true && v.length >= 4 ? v : _randomCardNumber();
-  }
-
   /// Tek bir karti okur. Kart okunana kadar bekler; sure dolunca null doner.
   static Future<NfcCardData?> read() async {
     if (!await supported()) return null;
-    NfcTag? tag;
+
+    final done = Completer<String?>();
     try {
+      _sessionOn = true;
       await NfcManager.instance.startSession(
-        onDiscovered: (t) async {
-          tag = t;
-          await NfcManager.instance.stopSession();
+        onDiscovered: (tag) async {
+          final id = _identifier(tag);
+          if (!done.isCompleted) done.complete(id);
+          try {
+            await NfcManager.instance.stopSession();
+          } catch (_) {}
+          _sessionOn = false;
         },
       );
     } catch (_) {
+      _sessionOn = false;
       return null;
     }
 
-    final deadline = DateTime.now().add(const Duration(seconds: 40));
-    while (DateTime.now().isBefore(deadline)) {
-      if (tag != null) {
-        return NfcCardData(id: _identifier(tag!));
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-    }
+    final id = await done.future
+        .timeout(const Duration(seconds: 40), onTimeout: () => null);
+    _sessionOn = false;
+    return id == null ? null : NfcCardData(id: id);
+  }
+
+  /// Bekleyen oturumu kapatir (ekrandan cikildiginda).
+  static Future<void> stop() async {
+    if (!_sessionOn) return;
+    _sessionOn = false;
     try {
       await NfcManager.instance.stopSession();
     } catch (_) {}
-    return null;
   }
 
+  /// Kartin seri numarasini onaltilik yaziya cevirir.
   static String _identifier(NfcTag tag) {
-    for (final key in ['nfca', 'nfcb', 'isodep', 'mifareultralight', 'nfcv']) {
+    for (final key in const [
+      'nfca',
+      'nfcb',
+      'isodep',
+      'mifareultralight',
+      'nfcv',
+      'nfcf',
+    ]) {
       final v = tag.data[key];
-      if (v is Map && v['identifier'] is List) {
-        final bytes = (v['identifier'] as List).cast<int>();
-        if (bytes.isNotEmpty) {
-          return bytes
-              .map((b) => b.toRadixString(16).padLeft(2, '0'))
-              .join()
-              .toUpperCase();
-        }
+      if (v == null) continue;
+      final raw = v is Map ? v['identifier'] : null;
+      if (raw is! List) continue;
+      final bytes = <int>[];
+      for (final b in raw) {
+        if (b is int) bytes.add(b);
       }
+      if (bytes.isEmpty) continue;
+      return bytes
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join()
+          .toUpperCase();
     }
     return tag.hashCode.toRadixString(16).toUpperCase().padLeft(8, '0');
-  }
-
-  static String _randomCardNumber() {
-    final rnd = Random();
-    return List.generate(16, (_) => rnd.nextInt(10)).join();
   }
 }

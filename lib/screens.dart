@@ -1,18 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'cardinfo.dart';
 import 'payment.dart';
 import 'theme.dart';
 import 'vault.dart';
 import 'widgets.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
-
-void snack(BuildContext context, String text) {
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(text)));
-}
 
 /// Acilista PIN durumuna gore dogru ekrani gosterir ve
 /// arka plandan donuste uygulamayi tekrar kilitler.

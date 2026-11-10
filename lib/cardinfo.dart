@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 
 /// Kart bilgisi ve tutar bicimlendirme yardimcilari.
@@ -37,7 +38,7 @@ class CardInfo {
   /// Kart numarasindan gosterilecek bilgileri turetir.
   /// Bu bilgiler kurgudur; gercek bir karta karsilik gelmez.
   factory CardInfo.fromNumber(String number) {
-    final seed = _seed(number);
+    final seed = stableSeed(number);
     final rnd = Random(seed);
     return CardInfo(
       number: number,
@@ -52,19 +53,21 @@ class CardInfo {
       ? number
       : '**** ${number.substring(number.length - 4)}';
 
-  int _seed(String s) {
-    var h = 7;
-    for (final c in s.codeUnits) {
-      h = (h * 31 + c) & 0x7fffffff;
-    }
-    return h;
-  }
-
   String _expiry(Random rnd) {
     final month = rnd.nextInt(12) + 1;
     final year = DateTime.now().year + 1 + rnd.nextInt(4);
     return '${month.toString().padLeft(2, '0')}/${year % 100}';
   }
+}
+
+/// Metinden her zaman ayni sayiyi ureten basit karma (FNV-1a).
+int stableSeed(String s) {
+  var h = 2166136261;
+  for (final c in utf8.encode(s)) {
+    h ^= c;
+    h = (h * 16777619) & 0x7fffffff;
+  }
+  return h == 0 ? 1 : h;
 }
 
 /// 1234.5 -> "1.234,50"
@@ -99,7 +102,7 @@ class AmountInputFormatter {
   }
 
   static double? parse(String raw) {
-    final v = double.tryParse(normalize(raw));
+    final v = double.tryParse(normalize(raw).replaceAll(',', '.'));
     if (v == null || v <= 0) return null;
     return v;
   }

@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 
 import 'cardinfo.dart';
@@ -22,6 +20,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
   double _amount = 0;
   CardInfo? _card;
   String? _nfcMessage;
+  int _receiptSeed = 0;
+
+  @override
+  void dispose() {
+    NfcService.stop();
+    super.dispose();
+  }
 
   Future<void> _confirmAmount() async {
     final v = AmountInputFormatter.parse(_raw);
@@ -81,26 +86,35 @@ class _PaymentScreenState extends State<PaymentScreen> {
     setState(() => _step = PayStep.processing);
     await Future<void>.delayed(const Duration(milliseconds: 4500));
     if (!mounted) return;
+
     var digits = nfcId.replaceAll(RegExp(r'[^0-9]'), '');
+    var seed = 0;
+    for (final c in nfcId.codeUnits) {
+      seed = (seed * 31 + c) & 0x7fffffff;
+    }
     if (digits.length < 16) {
-      final rnd = Random(nfcId.hashCode);
+      var x = seed == 0 ? 1 : seed;
       while (digits.length < 16) {
-        digits += rnd.nextInt(10).toString();
+        x = (x * 1103515245 + 12345) & 0x7fffffff;
+        digits += (x % 10).toString();
       }
     }
     setState(() {
       _card = CardInfo.fromNumber(digits.substring(0, 16));
+      _receiptSeed = seed;
       _step = PayStep.success;
     });
   }
 
   void _reset() {
+    NfcService.stop();
     setState(() {
       _raw = '';
       _step = PayStep.amount;
       _amount = 0;
       _card = null;
       _nfcMessage = null;
+      _receiptSeed = 0;
     });
   }
 
@@ -111,8 +125,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   String get _receiptNo {
-    final rnd = Random(_card?.number.hashCode ?? 1);
-    return 'NF${rnd.nextInt(900000) + 100000}';
+    final n = (_receiptSeed % 900000) + 100000;
+    return 'NF$n';
   }
 
   @override
@@ -141,11 +155,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       case PayStep.confirm:
         return _confirmBody();
       case PayStep.checkNfc:
-        return _statusBody(
-          Icons.nfc,
-          'NFC kontrol ediliyor',
-          _nfcMessage,
-        );
+        return _statusBody(Icons.nfc, 'NFC kontrol ediliyor', _nfcMessage);
       case PayStep.waiting:
         return _waitingBody();
       case PayStep.processing:
