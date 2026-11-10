@@ -53,7 +53,7 @@ class CardInfo {
       ? number
       : '**** ${number.substring(number.length - 4)}';
 
-  String _expiry(Random rnd) {
+  static String _expiry(Random rnd) {
     final month = rnd.nextInt(12) + 1;
     final year = DateTime.now().year + 1 + rnd.nextInt(4);
     return '${month.toString().padLeft(2, '0')}/${year % 100}';
