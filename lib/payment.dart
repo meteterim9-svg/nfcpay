@@ -293,7 +293,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Tutarı girin, herhangi bir NFC etiketi okutun ve test işlem akışını izleyin. Gerçek tahsilat yapılmaz.',
+              'Tutarı girin ve NFC kartınızı okutun.',
               style: TextStyle(color: kMuted, fontSize: 12, height: 1.45),
             ),
           ),
@@ -379,7 +379,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ),
             const SizedBox(height: 26),
             const Text(
-              'Banka onayı bekleniyor…',
+              'İşlem doğrulanıyor…',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
             ),
@@ -392,7 +392,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             const CircularProgressIndicator(),
             const SizedBox(height: 22),
             const Text(
-              'Test akışı: gerçek banka bağlantısı kurulmaz ve hesabınızdan para çekilmez.',
+              'İşlem bilgileriniz kontrol ediliyor…',
               textAlign: TextAlign.center,
               style: TextStyle(color: kMuted, height: 1.5, fontSize: 13),
             ),
@@ -406,9 +406,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
     return Center(key: const ValueKey('success'), child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
       Container(width: 112, height: 112, decoration: const BoxDecoration(color: Color(0xFF123B32), shape: BoxShape.circle), child: const Icon(Icons.check_rounded, color: kGreen, size: 66)),
       const SizedBox(height: 24),
-      const Text('Ödeme akışı tamamlandı', textAlign: TextAlign.center, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
+      const Text('İşlem akışı tamamlandı', textAlign: TextAlign.center, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
       const SizedBox(height: 10),
-      const Text('Test işlemi tamamlandı · Gerçek tahsilat yapılmadı.', textAlign: TextAlign.center, style: TextStyle(color: kMuted)),
+      const Text('İşlem bilgileri başarıyla alındı.', textAlign: TextAlign.center, style: TextStyle(color: kMuted)),
       const SizedBox(height: 26),
       Container(width: double.infinity, padding: const EdgeInsets.all(22), decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(20)), child: Column(children: [
         const Text('İŞLEM TUTARI', style: TextStyle(color: kMuted, fontSize: 11, letterSpacing: 1.3, fontWeight: FontWeight.w700)),
@@ -417,7 +417,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         const SizedBox(height: 14),
         const Divider(color: Colors.white12),
         const SizedBox(height: 8),
-        const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.verified_rounded, color: kGreen, size: 18), SizedBox(width: 8), Text('İşlem onaylandı', style: TextStyle(color: kGreen))]),
+        const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.verified_rounded, color: kGreen, size: 18), SizedBox(width: 8), Text('NFC okuma tamamlandı', style: TextStyle(color: kGreen))]),
       ])),
       const SizedBox(height: 24),
       SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: _reset, icon: const Icon(Icons.add_rounded), label: const Text('Yeni işlem'))),
