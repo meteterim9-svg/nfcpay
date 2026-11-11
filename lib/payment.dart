@@ -406,7 +406,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     return Center(key: const ValueKey('success'), child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
       Container(width: 112, height: 112, decoration: const BoxDecoration(color: Color(0xFF123B32), shape: BoxShape.circle), child: const Icon(Icons.check_rounded, color: kGreen, size: 66)),
       const SizedBox(height: 24),
-      const Text('Ödeme başarıyla tamamlandı', textAlign: TextAlign.center, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
+      const Text('Ödeme akışı tamamlandı', textAlign: TextAlign.center, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
       const SizedBox(height: 10),
       const Text('Test işlemi tamamlandı · Gerçek tahsilat yapılmadı.', textAlign: TextAlign.center, style: TextStyle(color: kMuted)),
       const SizedBox(height: 26),
