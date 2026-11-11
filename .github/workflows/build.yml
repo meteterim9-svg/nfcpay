@@ -23,25 +23,20 @@ jobs:
         run: |
           test -f android/build.gradle.kts
           cat android/build.gradle.kts
-      - name: Build release APKs per ABI
-        run: flutter build apk --release --split-per-abi
-      - name: Verify APK archives and signatures
+      - name: Build one universal release APK
+        run: flutter build apk --release
+      - name: Verify APK archive and checksum
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          apks=(build/app/outputs/flutter-apk/app-*-release.apk)
-          test ${#apks[@]} -gt 0
-          for apk in "${apks[@]}"; do
-            echo "Checking $apk"
-            unzip -t "$apk"
-            echo "SHA256:"
-            sha256sum "$apk"
-            ls -lh "$apk"
-          done
-      - name: Upload release APKs
+          apk="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$apk"
+          unzip -t "$apk"
+          sha256sum "$apk"
+          ls -lh "$apk"
+      - name: Upload one APK
         uses: actions/upload-artifact@v4
         with:
-          name: nfcpay-release-apks
-          path: build/app/outputs/flutter-apk/app-*-release.apk
+          name: nfcpay-single-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
