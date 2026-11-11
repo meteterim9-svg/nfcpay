@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,16 +19,29 @@ jobs:
         run: flutter create . --platforms=android --org com.example
       - name: Install dependencies
         run: flutter pub get
-      - name: Force plugin subprojects to compileSdk 36
+      - name: Verify Android Gradle configuration
         run: |
-          if [ ! -f android/build.gradle.kts ]; then
-            echo "root build.gradle.kts missing"; exit 1
-          fi
+          test -f android/build.gradle.kts
           cat android/build.gradle.kts
-      - name: Build debug APK
-        run: flutter build apk --debug
-      - name: Upload APK artifact
+      - name: Build release APKs per ABI
+        run: flutter build apk --release --split-per-abi
+      - name: Verify APK archives and signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(build/app/outputs/flutter-apk/app-*-release.apk)
+          test ${#apks[@]} -gt 0
+          for apk in "${apks[@]}"; do
+            echo "Checking $apk"
+            unzip -t "$apk"
+            echo "SHA256:"
+            sha256sum "$apk"
+            ls -lh "$apk"
+          done
+      - name: Upload release APKs
         uses: actions/upload-artifact@v4
         with:
-          name: nfcpay-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: nfcpay-release-apks
+          path: build/app/outputs/flutter-apk/app-*-release.apk
+          if-no-files-found: error
