@@ -4,7 +4,7 @@ import 'cardinfo.dart';
 import 'nfc_service.dart';
 import 'theme.dart';
 
-enum _ReaderState { idle, checking, scanning, processing, detected, success, unavailable, failed }
+enum _ReaderState { idle, checking, scanning, processing, awaitingBankApproval, detected, success, unavailable, failed }
 
 class PaymentScreen extends StatefulWidget {
   const PaymentScreen({super.key});
@@ -62,7 +62,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
       }
     });
     if (result != null) {
-      await Future.delayed(const Duration(seconds: 4));
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+      setState(() => _state = _ReaderState.awaitingBankApproval);
+      await Future.delayed(const Duration(seconds: 2));
       if (!mounted) return;
       setState(() => _state = _ReaderState.success);
     }
@@ -168,6 +171,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       return _scanning();
     }
     if (_state == _ReaderState.processing) return _processing();
+    if (_state == _ReaderState.awaitingBankApproval) return _bankApproval();
     if (_state == _ReaderState.detected || _state == _ReaderState.success) return _success();
     if (_state == _ReaderState.unavailable) {
       return _message(
@@ -289,7 +293,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Tutarı girin, herhangi bir NFC etiketi okutun ve işlemin tamamlanma animasyonunu izleyin.',
+              'Tutarı girin, herhangi bir NFC etiketi okutun ve test işlem akışını izleyin. Gerçek tahsilat yapılmaz.',
               style: TextStyle(color: kMuted, fontSize: 12, height: 1.45),
             ),
           ),
@@ -356,13 +360,55 @@ class _PaymentScreenState extends State<PaymentScreen> {
     ])));
   }
 
+  Widget _bankApproval() {
+    return Center(
+      key: const ValueKey('bankApproval'),
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 112,
+              height: 112,
+              decoration: BoxDecoration(
+                color: kBlue.withOpacity(.13),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.account_balance_rounded, color: kBlue, size: 54),
+            ),
+            const SizedBox(height: 26),
+            const Text(
+              'Banka onayı bekleniyor…',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '${formatAmount(_amount ?? 0)} ₺',
+              style: const TextStyle(color: kGreen, fontSize: 29, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 14),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 22),
+            const Text(
+              'Test akışı: gerçek banka bağlantısı kurulmaz ve hesabınızdan para çekilmez.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: kMuted, height: 1.5, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _success() {
     return Center(key: const ValueKey('success'), child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
       Container(width: 112, height: 112, decoration: const BoxDecoration(color: Color(0xFF123B32), shape: BoxShape.circle), child: const Icon(Icons.check_rounded, color: kGreen, size: 66)),
       const SizedBox(height: 24),
       const Text('Ödeme başarıyla tamamlandı', textAlign: TextAlign.center, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800)),
       const SizedBox(height: 10),
-      const Text('İşlem başarıyla sonuçlandı.', style: TextStyle(color: kMuted)),
+      const Text('Test işlemi tamamlandı · Gerçek tahsilat yapılmadı.', textAlign: TextAlign.center, style: TextStyle(color: kMuted)),
       const SizedBox(height: 26),
       Container(width: double.infinity, padding: const EdgeInsets.all(22), decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(20)), child: Column(children: [
         const Text('İŞLEM TUTARI', style: TextStyle(color: kMuted, fontSize: 11, letterSpacing: 1.3, fontWeight: FontWeight.w700)),
