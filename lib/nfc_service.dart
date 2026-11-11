@@ -2,57 +2,79 @@ import 'dart:async';
 
 import 'package:nfc_manager/nfc_manager.dart';
 
-/// Anlik olarak okunmus kartin ham bilgisi.
+/// A card/tag identifier returned by the NFC reader.
 class NfcCardData {
-  /// Kartin kimligi (seri numarasi); ayni kart hep ayni degeri verir.
   final String id;
   const NfcCardData({required this.id});
 }
 
-/// NFC donanimini yonetir. Ag erisimi yoktur; sadece kart okunur.
+/// Owns exactly one NFC session at a time.
 class NfcService {
   static bool _sessionOn = false;
+  static Completer<String?>? _activeCompleter;
 
-  /// Cihazda NFC acik mi?
   static Future<bool> supported() async {
     try {
-      final r = await NfcManager.instance.isAvailable();
-      return r is bool ? r : false;
+      return await NfcManager.instance.isAvailable();
     } catch (_) {
       return false;
     }
   }
 
-  /// Tek bir karti okur. Kart okunana kadar bekler; sure dolunca null doner.
-  static Future<NfcCardData?> read() async {
-    if (!await supported()) return null;
+  /// Reads one tag. The NFC session is always closed, including on timeout.
+  static Future<NfcCardData?> read({
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    if (_sessionOn || !await supported()) return null;
 
-    final done = Completer<String?>();
-    try {
-      _sessionOn = true;
-      await NfcManager.instance.startSession(
-        onDiscovered: (tag) async {
-          final id = _identifier(tag);
-          if (!done.isCompleted) done.complete(id);
-          try {
-            await NfcManager.instance.stopSession();
-          } catch (_) {}
-          _sessionOn = false;
-        },
-      );
-    } catch (_) {
+    final completer = Completer<String?>();
+    _activeCompleter = completer;
+    Timer? timer;
+    _sessionOn = true;
+
+    Future<void> closeSession() async {
+      if (!_sessionOn) return;
       _sessionOn = false;
-      return null;
+      try {
+        await NfcManager.instance.stopSession();
+      } catch (_) {
+        // The platform may already have closed the session.
+      }
     }
 
-    final id = await done.future
-        .timeout(const Duration(seconds: 40), onTimeout: () => null);
-    _sessionOn = false;
-    return id == null ? null : NfcCardData(id: id);
+    try {
+      await NfcManager.instance.startSession(
+        onDiscovered: (tag) async {
+          if (completer.isCompleted) return;
+          final id = _identifier(tag);
+          // Any discovered NFC tag triggers the local payment flow.
+          completer.complete(id.isEmpty ? 'NFC etiketi algılandı' : id);
+          await closeSession();
+        },
+      );
+
+      timer = Timer(timeout, () {
+        if (!completer.isCompleted) completer.complete(null);
+        closeSession();
+      });
+
+      final id = await completer.future;
+      return id == null || id.isEmpty ? null : NfcCardData(id: id);
+    } catch (_) {
+      if (!completer.isCompleted) completer.complete(null);
+      await closeSession();
+      return null;
+    } finally {
+      timer?.cancel();
+      if (identical(_activeCompleter, completer)) _activeCompleter = null;
+      await closeSession();
+    }
   }
 
-  /// Bekleyen oturumu kapatir (ekrandan cikildiginda).
   static Future<void> stop() async {
+    final pending = _activeCompleter;
+    if (pending != null && !pending.isCompleted) pending.complete(null);
+    _activeCompleter = null;
     if (!_sessionOn) return;
     _sessionOn = false;
     try {
@@ -60,7 +82,6 @@ class NfcService {
     } catch (_) {}
   }
 
-  /// Kartin seri numarasini onaltilik yaziya cevirir.
   static String _identifier(NfcTag tag) {
     for (final key in const [
       'nfca',
@@ -70,20 +91,17 @@ class NfcService {
       'nfcv',
       'nfcf',
     ]) {
-      final v = tag.data[key];
-      if (v == null) continue;
-      final raw = v is Map ? v['identifier'] : null;
+      final value = tag.data[key];
+      if (value is! Map) continue;
+      final raw = value['identifier'];
       if (raw is! List) continue;
-      final bytes = <int>[];
-      for (final b in raw) {
-        if (b is int) bytes.add(b);
-      }
+      final bytes = raw.whereType<int>().toList(growable: false);
       if (bytes.isEmpty) continue;
       return bytes
-          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
           .join()
           .toUpperCase();
     }
-    return tag.hashCode.toRadixString(16).toUpperCase().padLeft(8, '0');
+    return '';
   }
 }

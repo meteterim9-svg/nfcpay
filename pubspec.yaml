@@ -1,7 +1,7 @@
 name: nfcpay
-description: Internetsiz calisan, NFC ile odeme yapilan eglence amacli Flutter uygulamasi (demo).
+description: NFC kart ve etiketlerini algılayan Flutter uygulaması.
 publish_to: "none"
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
